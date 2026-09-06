@@ -89,6 +89,46 @@ describe("tool parameters", () => {
       })
       expect(toJsonSchema(WebFetch).properties?.format).not.toHaveProperty("anyOf")
     })
+
+    test("strips null from optional fields but keeps it inside nested unions", () => {
+      expect(toJsonSchema(Schema.Struct({ value: Schema.optional(Schema.NullOr(Schema.String)) }))).toEqual({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        properties: { value: { anyOf: [{ type: "string" }, { type: "null" }] } },
+      })
+    })
+
+    test("collapses number unions with non-finite enum members to a plain number", () => {
+      expect(toJsonSchema(Schema.Struct({ value: Schema.Number })).properties).toEqual({ value: { type: "number" } })
+      expect(toJsonSchema(Schema.Struct({ value: Schema.Union([Schema.String, Schema.Number]) })).properties).toEqual({
+        value: { anyOf: [{ type: "string" }, { type: "number" }] },
+      })
+    })
+
+    test("collapses empty struct unions to an object with no properties", () => {
+      expect(toJsonSchema(Schema.Struct({ value: Schema.Struct({}) })).properties).toEqual({
+        value: { type: "object", properties: {} },
+      })
+    })
+
+    test("flattens allOf when constraint keys do not collide", () => {
+      expect(
+        toJsonSchema(Schema.Struct({ value: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(5)) }))
+          .properties,
+      ).toEqual({ value: { type: "string", minLength: 1, maxLength: 5 } })
+    })
+
+    test("keeps an explicit integer maximum instead of bounding to safe range", () => {
+      expect(
+        toJsonSchema(Schema.Struct({ value: Schema.Int.check(Schema.isLessThanOrEqualTo(10)) })).properties,
+      ).toEqual({ value: { type: "integer", maximum: 10 } })
+    })
+
+    test("passes through non-object schema values untouched", () => {
+      expect(toJsonSchema(Schema.Struct({ value: Schema.Literals(["a", "b"]) })).properties).toEqual({
+        value: { type: "string", enum: ["a", "b"] },
+      })
+    })
   })
 
   describe("apply_patch", () => {
