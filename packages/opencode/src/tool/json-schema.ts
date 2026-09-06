@@ -29,10 +29,20 @@ function normalize(value: unknown, options: { stripNull?: boolean } = {}): unkno
   if (Array.isArray(value)) return value.map((item) => normalize(item))
   if (!isRecord(value)) return value
 
+  const schema = normalizeChildren(value)
+  if (schema.additionalProperties === true) delete schema.additionalProperties
+
+  const rewritten = collapseAnyOf(schema, options.stripNull === true) ?? flattenAllOf(schema)
+  if (rewritten) return normalize(rewritten)
+
+  return boundIntegerRange(schema)
+}
+
+function normalizeChildren(value: JsonObject): JsonObject {
   const required = Array.isArray(value.required)
     ? new Set(value.required.filter((item) => typeof item === "string"))
     : undefined
-  const schema = Object.fromEntries(
+  return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,
       key === "properties" && isRecord(item)
@@ -45,46 +55,35 @@ function normalize(value: unknown, options: { stripNull?: boolean } = {}): unkno
         : normalize(item),
     ]),
   )
+}
 
-  if (schema.additionalProperties === true) delete schema.additionalProperties
+// Returns a replacement schema when the `anyOf` union can be simplified, or
+// undefined to leave the schema untouched. Each rewrite is re-normalized by the caller.
+function collapseAnyOf(schema: JsonObject, stripNull: boolean): JsonObject | undefined {
+  if (!Array.isArray(schema.anyOf)) return
+  const items: unknown[] = schema.anyOf
 
-  if (options.stripNull && Array.isArray(schema.anyOf)) {
-    const withoutNull = schema.anyOf.filter((item) => !isRecord(item) || item.type !== "null")
-    if (withoutNull.length !== schema.anyOf.length) return normalize({ ...schema, anyOf: withoutNull })
-  }
+  const withoutNull = stripNull ? items.filter((item) => !isRecord(item) || item.type !== "null") : items
+  if (withoutNull.length !== items.length) return { ...schema, anyOf: withoutNull }
 
-  if (Array.isArray(schema.anyOf)) {
-    const withoutNull = schema.anyOf
-    const number = withoutNull.find((item) => isRecord(item) && item.type === "number")
-    const nonFinite = withoutNull.filter(
-      (item) => isRecord(item) && Array.isArray(item.enum) && item.enum.every((entry) => isNonFiniteNumber(entry)),
-    )
-    if (number && nonFinite.length === withoutNull.length - 1) {
-      const { anyOf: _, ...rest } = schema
-      return normalize({ ...number, ...rest })
-    }
+  const { anyOf: _, ...rest } = schema
+  const number = items.find((item) => isRecord(item) && item.type === "number")
+  if (isRecord(number) && items.filter(isNonFiniteEnum).length === items.length - 1) return { ...number, ...rest }
+  if (isEmptyStructUnion(items)) return { type: "object", properties: {}, ...rest }
+  if (items.length === 1 && isRecord(items[0])) return { ...items[0], ...rest }
+}
 
-    if (isEmptyStructUnion(withoutNull)) {
-      const { anyOf: _, ...rest } = schema
-      return normalize({ type: "object", properties: {}, ...rest })
-    }
+function flattenAllOf(schema: JsonObject): JsonObject | undefined {
+  if (!Array.isArray(schema.allOf)) return
+  const items: unknown[] = schema.allOf
+  if (!items.every(isRecord) || !canFlattenAllOf(items, schema)) return
+  const { allOf: _, ...rest } = schema
+  return { ...Object.assign({}, ...items), ...rest }
+}
 
-    if (withoutNull.length === 1 && isRecord(withoutNull[0])) {
-      const { anyOf: _, ...rest } = schema
-      return normalize({ ...withoutNull[0], ...rest })
-    }
-  }
-
-  if (Array.isArray(schema.allOf) && schema.allOf.every(isRecord) && canFlattenAllOf(schema.allOf, schema)) {
-    const { allOf, ...rest } = schema
-    return normalize({ ...Object.assign({}, ...allOf), ...rest })
-  }
-
-  if (schema.type === "integer" && schema.maximum === undefined) {
-    return { minimum: Number.MIN_SAFE_INTEGER, ...schema, maximum: Number.MAX_SAFE_INTEGER }
-  }
-
-  return schema
+function boundIntegerRange(schema: JsonObject): JsonObject {
+  if (schema.type !== "integer" || schema.maximum !== undefined) return schema
+  return { minimum: Number.MIN_SAFE_INTEGER, ...schema, maximum: Number.MAX_SAFE_INTEGER }
 }
 
 function isRecord(value: unknown): value is JsonObject {
@@ -97,6 +96,10 @@ function isJsonSchema(value: unknown): value is JSONSchema7 {
 
 function isNonFiniteNumber(value: unknown) {
   return value === "NaN" || value === "Infinity" || value === "-Infinity"
+}
+
+function isNonFiniteEnum(value: unknown) {
+  return isRecord(value) && Array.isArray(value.enum) && value.enum.every(isNonFiniteNumber)
 }
 
 function isEmptyStructUnion(items: unknown[]) {
