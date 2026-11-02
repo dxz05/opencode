@@ -13,6 +13,7 @@
     "dev:stats": "bun sst shell --stage=production -- bun run --cwd packages/stats/app dev",
     "dev:storybook": "bun --cwd packages/storybook storybook",
     "lint": "oxlint",
+    "lint:eslint": "bun script/eslint.ts",
     "typecheck": "bun turbo typecheck",
     "upgrade-opentui": "bun run script/upgrade-opentui.ts",
     "postinstall": "bun run --cwd packages/core fix-node-pty",
@@ -100,6 +101,7 @@
     "@tsconfig/bun": "catalog:",
     "@types/mime-types": "3.0.1",
     "@typescript/native-preview": "catalog:",
+    "eslint": "9.39.5",
     "glob": "13.0.5",
     "husky": "9.1.7",
     "oxlint": "1.60.0",
@@ -107,7 +109,8 @@
     "prettier": "3.6.2",
     "semver": "^7.6.0",
     "sst": "catalog:",
-    "turbo": "2.10.2"
+    "turbo": "2.10.2",
+    "typescript-eslint": "8.71.2"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.933.0",
